@@ -1,5 +1,7 @@
 use actix::prelude::*;
-use rust_actix_labx;
+use rust_actix_labx::{WindowedPercentileService, ResponseTime, ObserveResponseTimeRequest, ResponseTimeP95Request};
+use time::{Date, Month, PrimitiveDateTime};
+
 
 // This macro sets up the Actix system.
 // Otherwise you would have to call:
@@ -12,28 +14,28 @@ use rust_actix_labx;
 async fn main() {
     println!("Starting...");
 
-    let jul1 = time::Date::from_calendar_date(2022, time::Month::July, 1).unwrap();
-    let aug1 = time::Date::from_calendar_date(2022, time::Month::August, 1).unwrap();
+    let jul1 = Date::from_calendar_date(2022, Month::July, 1).unwrap();
+    let aug1 = Date::from_calendar_date(2022, Month::August, 1).unwrap();
     let midnight = time::Time::MIDNIGHT;
 
     let month_of_july = rust_actix_labx::Interval::new(
-        time::PrimitiveDateTime::new(jul1, midnight),
-        time::PrimitiveDateTime::new(aug1, midnight),
+        PrimitiveDateTime::new(jul1, midnight),
+        PrimitiveDateTime::new(aug1, midnight),
     );
 
     // start new actor
-    let addr = rust_actix_labx::WindowedPercentileService::new(month_of_july).start();
+    let addr = WindowedPercentileService::new(month_of_july).start();
 
-    let rt_minutes_at = |rt: time::Duration, day, hh, mm| -> rust_actix_labx::ResponseTime {
-        let t = time::PrimitiveDateTime::new(
-            time::Date::from_calendar_date(2022, time::Month::July, day).unwrap(),
+    let rt_minutes_at = |rt: time::Duration, day, hh, mm| -> ResponseTime {
+        let t = PrimitiveDateTime::new(
+            Date::from_calendar_date(2022, Month::July, day).unwrap(),
             time::Time::from_hms(hh, mm, 0).unwrap(),
         );
-        rust_actix_labx::ResponseTime::new(rt, t)
+        ResponseTime::new(rt, t)
     };
 
     for i in 0..100 {
-        let req = rust_actix_labx::ObserveResponseTimeRequest::new(rt_minutes_at(
+        let req = ObserveResponseTimeRequest::new(rt_minutes_at(
             time::Duration::seconds(180 + i),
             1,
             12,
@@ -43,7 +45,7 @@ async fn main() {
     }
 
     let resp = addr
-        .send(rust_actix_labx::ResponseTimeP95Request::new())
+        .send(ResponseTimeP95Request::new())
         .await;
     let p95 = resp.unwrap();
 

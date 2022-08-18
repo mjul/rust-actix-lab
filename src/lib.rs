@@ -1,30 +1,30 @@
 use actix::prelude::*;
-use time;
+use time::{Duration, PrimitiveDateTime};
 
 /// A half-open time interval. From is included, to is not.
 #[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Interval {
-    from: time::PrimitiveDateTime,
-    to: time::PrimitiveDateTime,
+    from: PrimitiveDateTime,
+    to: PrimitiveDateTime,
 }
 impl Interval {
-    pub fn new(from: time::PrimitiveDateTime, to: time::PrimitiveDateTime) -> Self {
+    pub fn new(from: PrimitiveDateTime, to: PrimitiveDateTime) -> Self {
         Self { from, to }
     }
-    fn includes(&self, t: &time::PrimitiveDateTime) -> bool {
+    fn includes(&self, t: &PrimitiveDateTime) -> bool {
         (&self.from <= t) && (t < &self.to)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResponseTime {
-    value: time::Duration,
-    time: time::PrimitiveDateTime,
+    value: Duration,
+    time: PrimitiveDateTime,
 }
 
 impl ResponseTime {
     /// Construct a response time measurement with the given response time value observed at the given time.
-    pub fn new(value:time::Duration, time: time::PrimitiveDateTime) -> ResponseTime {
+    pub fn new(value: Duration, time: PrimitiveDateTime) -> ResponseTime {
         ResponseTime { value, time }
     }
 }
@@ -32,7 +32,7 @@ impl ResponseTime {
 /// A windowed response time percentile calculator
 pub struct WindowedPercentileService {
     window: Interval,
-    qualified_observations: Vec<time::Duration>,
+    qualified_observations: Vec<Duration>,
 }
 
 /// Get the value of the 95th percentile
@@ -63,7 +63,7 @@ impl WindowedPercentileService {
             self.qualified_observations.push(datum.value);
         }
     }
-    fn get_p95(&self) -> Option<time::Duration> {
+    fn get_p95(&self) -> Option<Duration> {
         p95(&self.qualified_observations)
     }
 }
@@ -78,7 +78,7 @@ impl Actor for WindowedPercentileService {
 /// Observed 95th percentile for response time
 #[derive(Debug, MessageResponse)]
 pub struct ResponseTimeP95Response {
-    pub value: Option<time::Duration>,
+    pub value: Option<Duration>,
     pub interval: Interval,
 }
 
@@ -92,6 +92,13 @@ impl ResponseTimeP95Request {
         ResponseTimeP95Request {}
     }
 }
+
+impl Default for ResponseTimeP95Request {
+   fn default() -> Self {
+        Self::new()
+    }
+}
+
 
 // by implementing handler, we declare that the service accepts this message
 
@@ -134,13 +141,15 @@ impl Handler<ObserveResponseTimeRequest> for WindowedPercentileService {
 
 #[cfg(test)]
 mod tests {
+    use time::{PrimitiveDateTime, Date, Month, Time};
+
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
-    fn today_at(hour: u8) -> time::PrimitiveDateTime {
-        let today: time::Date =
-            time::Date::from_calendar_date(2022, time::Month::August, 17).unwrap();
-        time::PrimitiveDateTime::new(today, time::Time::from_hms(hour, 0, 0).unwrap())
+    fn today_at(hour: u8) -> PrimitiveDateTime {
+        let today: Date =
+            Date::from_calendar_date(2022, Month::August, 17).unwrap();
+        PrimitiveDateTime::new(today, Time::from_hms(hour, 0, 0).unwrap())
     }
 
     #[test]
