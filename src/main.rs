@@ -1,7 +1,8 @@
 use actix::prelude::*;
-use rust_actix_labx::{WindowedPercentileService, ResponseTime, ObserveResponseTimeRequest, ResponseTimeP95Request};
+use rust_actix_labx::{
+    ObserveResponseTimeRequest, ResponseTime, ResponseTimeP95Request, WindowedPercentileService,
+};
 use time::{Date, Month, PrimitiveDateTime};
-
 
 // This macro sets up the Actix system.
 // Otherwise you would have to call:
@@ -44,9 +45,7 @@ async fn main() {
         let _ = addr.send(req).await;
     }
 
-    let resp = addr
-        .send(ResponseTimeP95Request::new())
-        .await;
+    let resp = addr.send(ResponseTimeP95Request::new()).await;
     let p95 = resp.unwrap();
 
     // handle() returns tokio handle

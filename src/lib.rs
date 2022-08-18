@@ -94,11 +94,10 @@ impl ResponseTimeP95Request {
 }
 
 impl Default for ResponseTimeP95Request {
-   fn default() -> Self {
+    fn default() -> Self {
         Self::new()
     }
 }
-
 
 // by implementing handler, we declare that the service accepts this message
 
@@ -141,14 +140,13 @@ impl Handler<ObserveResponseTimeRequest> for WindowedPercentileService {
 
 #[cfg(test)]
 mod tests {
-    use time::{PrimitiveDateTime, Date, Month, Time};
+    use time::{Date, Month, PrimitiveDateTime, Time};
 
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
     fn today_at(hour: u8) -> PrimitiveDateTime {
-        let today: Date =
-            Date::from_calendar_date(2022, Month::August, 17).unwrap();
+        let today: Date = Date::from_calendar_date(2022, Month::August, 17).unwrap();
         PrimitiveDateTime::new(today, Time::from_hms(hour, 0, 0).unwrap())
     }
 
