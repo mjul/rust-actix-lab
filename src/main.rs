@@ -1,6 +1,7 @@
 use actix::prelude::*;
 use rust_actix_labx::{
-    ObserveResponseTimeRequest, ResponseTime, ResponseTimeP95Request, WindowedPercentileService,
+    CalculateResponseTimeStatistics, ObserveResponseTime, ResponseTimeObservation,
+    WindowedPercentileService,
 };
 use time::{Date, Month, PrimitiveDateTime};
 
@@ -27,16 +28,16 @@ async fn main() {
     // start new actor
     let addr = WindowedPercentileService::new(month_of_july).start();
 
-    let rt_minutes_at = |rt: time::Duration, day, hh, mm| -> ResponseTime {
+    let rt_minutes_at = |rt: time::Duration, day, hh, mm| -> ResponseTimeObservation {
         let t = PrimitiveDateTime::new(
             Date::from_calendar_date(2022, Month::July, day).unwrap(),
             time::Time::from_hms(hh, mm, 0).unwrap(),
         );
-        ResponseTime::new(rt, t)
+        ResponseTimeObservation::new(rt, t)
     };
 
     for i in 0..100 {
-        let req = ObserveResponseTimeRequest::new(rt_minutes_at(
+        let req = ObserveResponseTime::new(rt_minutes_at(
             time::Duration::seconds(180 + i),
             1,
             12,
@@ -45,11 +46,11 @@ async fn main() {
         let _ = addr.send(req).await;
     }
 
-    let resp = addr.send(ResponseTimeP95Request::new()).await;
-    let p95 = resp.unwrap();
+    let resp = addr.send(CalculateResponseTimeStatistics::new()).await;
+    let stats = resp.unwrap().value;
 
     // handle() returns tokio handle
-    println!("RESULT: {:?}", p95.value);
+    println!("RESULT: {:?} (n={})", stats.p95, stats.n);
 
     // stop system and exit
     System::current().stop();

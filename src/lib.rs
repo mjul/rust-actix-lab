@@ -16,16 +16,17 @@ impl Interval {
     }
 }
 
+/// An observation of a response time
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResponseTime {
+pub struct ResponseTimeObservation {
     value: Duration,
     time: PrimitiveDateTime,
 }
 
-impl ResponseTime {
+impl ResponseTimeObservation {
     /// Construct a response time measurement with the given response time value observed at the given time.
-    pub fn new(value: Duration, time: PrimitiveDateTime) -> ResponseTime {
-        ResponseTime { value, time }
+    pub fn new(value: Duration, time: PrimitiveDateTime) -> ResponseTimeObservation {
+        ResponseTimeObservation { value, time }
     }
 }
 
@@ -58,7 +59,7 @@ impl WindowedPercentileService {
             qualified_observations: vec![],
         }
     }
-    fn add_observation(&mut self, datum: &ResponseTime) {
+    fn add_observation(&mut self, datum: &ResponseTimeObservation) {
         if self.window.includes(&datum.time) {
             self.qualified_observations.push(datum.value);
         }
@@ -75,66 +76,124 @@ impl Actor for WindowedPercentileService {
 
 // Messages can be declared with macros or by implementing the right traits
 
-/// Observed 95th percentile for response time
-#[derive(Debug, MessageResponse)]
-pub struct ResponseTimeP95Response {
-    pub value: Option<Duration>,
+/// A message with response time statistics for an interval (e.g. the P95 level).
+pub struct ResponseTimeStatistics {
+    //// The value of the 95th percentile
+    pub p95: Option<Duration>,
+    /// The number of observations
+    pub n: usize,
+    /// The interval for which it was observed
     pub interval: Interval,
 }
 
-#[derive(Message)]
-#[rtype(result = "ResponseTimeP95Response")]
-pub struct ResponseTimeP95Request {}
-
-impl ResponseTimeP95Request {
+impl ResponseTimeStatistics {
     /// Create a new message to request the response time P95 level.
-    pub fn new() -> ResponseTimeP95Request {
-        ResponseTimeP95Request {}
+    pub fn new(n: usize, p95: Option<Duration>, interval: Interval) -> ResponseTimeStatistics {
+        ResponseTimeStatistics { p95, n, interval }
     }
 }
 
-impl Default for ResponseTimeP95Request {
+#[derive(Message)]
+#[rtype(result = "ResponseTimeStatisticsCalculated")]
+pub struct CalculateResponseTimeStatistics {}
+impl CalculateResponseTimeStatistics {
+    pub fn new() -> Self {
+        CalculateResponseTimeStatistics {}
+    }
+}
+
+impl Default for CalculateResponseTimeStatistics {
     fn default() -> Self {
         Self::new()
     }
 }
 
-// by implementing handler, we declare that the service accepts this message
+#[derive(MessageResponse)]
+pub struct ResponseTimeStatisticsCalculated {
+    pub value: ResponseTimeStatistics,
+}
 
-impl Handler<ResponseTimeP95Request> for WindowedPercentileService {
-    type Result = ResponseTimeP95Response;
-    fn handle(&mut self, _msg: ResponseTimeP95Request, _ctx: &mut Context<Self>) -> Self::Result {
-        ResponseTimeP95Response {
-            value: self.get_p95(),
-            interval: self.window.clone(),
+// by implementing handler, we declare that the service accepts this message
+impl Handler<CalculateResponseTimeStatistics> for WindowedPercentileService {
+    type Result = ResponseTimeStatisticsCalculated;
+    fn handle(
+        &mut self,
+        _msg: CalculateResponseTimeStatistics,
+        _ctx: &mut Context<Self>,
+    ) -> Self::Result {
+        ResponseTimeStatisticsCalculated {
+            value: ResponseTimeStatistics {
+                p95: self.get_p95(),
+                n: self.qualified_observations.len(),
+                interval: self.window.clone(),
+            },
         }
     }
 }
 
 // Implement a message with traits
-pub struct ObserveResponseTimeRequest {
-    datum: ResponseTime,
+pub struct ObserveResponseTime {
+    datum: ResponseTimeObservation,
 }
-impl ObserveResponseTimeRequest {
-    pub fn new(rt: ResponseTime) -> ObserveResponseTimeRequest {
-        ObserveResponseTimeRequest { datum: rt }
+impl ObserveResponseTime {
+    pub fn new(rt: ResponseTimeObservation) -> ObserveResponseTime {
+        ObserveResponseTime { datum: rt }
     }
 }
 
-impl Message for ObserveResponseTimeRequest {
+impl Message for ObserveResponseTime {
     // unit () result, no return message
     type Result = ();
 }
 
 /// Collect an observation
-impl Handler<ObserveResponseTimeRequest> for WindowedPercentileService {
+impl Handler<ObserveResponseTime> for WindowedPercentileService {
+    type Result = ();
+    fn handle(&mut self, msg: ObserveResponseTime, _ctx: &mut Context<Self>) -> Self::Result {
+        self.add_observation(&msg.datum);
+    }
+}
+
+struct ResponseTimePerformanceMonitorService {
+    maximum: Duration,
+}
+
+/// This service issues an alert if the performance target is breached
+impl ResponseTimePerformanceMonitorService {
+    pub fn new(maximum: Duration) -> Self {
+        Self { maximum }
+    }
+}
+
+// This makes it an Actor
+impl Actor for ResponseTimePerformanceMonitorService {
+    type Context = Context<Self>;
+}
+
+// We can also make the structs messages by implementing the right trait
+impl Message for ResponseTimeStatisticsCalculated {
+    type Result = (); // When used as an event there is no response message
+}
+
+impl Handler<ResponseTimeStatisticsCalculated> for ResponseTimePerformanceMonitorService {
     type Result = ();
     fn handle(
         &mut self,
-        msg: ObserveResponseTimeRequest,
+        msg: ResponseTimeStatisticsCalculated,
         _ctx: &mut Context<Self>,
     ) -> Self::Result {
-        self.add_observation(&msg.datum);
+        if msg.value.n > 0 {
+            match msg.value.p95 {
+                Some(p95) => {
+                    if p95 >= self.maximum {
+                        println!("Breached");
+                    }
+                }
+                None => {
+                    // No observation, ignore
+                }
+            }
+        }
     }
 }
 
