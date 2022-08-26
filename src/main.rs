@@ -1,9 +1,9 @@
 use actix::prelude::*;
 use rust_actix_labx::{
-    CalculateResponseTimeStatistics, ObserveResponseTime, ResponseTimeObservation,
-    WindowedPercentileService,
+    CalculateResponseTimeStatistics, ObserveResponseTime, ResponseTimeMonitoringPipeline,
+    ResponseTimeObservation, WindowedPercentileService,
 };
-use time::{Date, Month, PrimitiveDateTime};
+use time::{Date, Duration, Month, PrimitiveDateTime};
 
 // This macro sets up the Actix system.
 // Otherwise you would have to call:
@@ -25,10 +25,13 @@ async fn main() {
         PrimitiveDateTime::new(aug1, midnight),
     );
 
-    // start new actor
+    //
+    // Warm-up exercise:
+    // Try calling the individual actors
+    //
     let addr = WindowedPercentileService::new(month_of_july).start();
 
-    let rt_minutes_at = |rt: time::Duration, day, hh, mm| -> ResponseTimeObservation {
+    let rt_minutes_at = |rt: Duration, day, hh, mm| -> ResponseTimeObservation {
         let t = PrimitiveDateTime::new(
             Date::from_calendar_date(2022, Month::July, day).unwrap(),
             time::Time::from_hms(hh, mm, 0).unwrap(),
@@ -38,7 +41,7 @@ async fn main() {
 
     for i in 0..100 {
         let req = ObserveResponseTime::new(rt_minutes_at(
-            time::Duration::seconds(180 + i),
+            Duration::seconds(180 + i),
             1,
             12,
             (i % 60) as u8,
@@ -50,7 +53,47 @@ async fn main() {
     let stats = resp.unwrap().value;
 
     // handle() returns tokio handle
-    println!("RESULT: {:?} (n={})", stats.p95, stats.n);
+    println!(
+        "RESULT: P95 = {}s  (n={})",
+        stats.p95.unwrap().whole_seconds(),
+        stats.n
+    );
+
+    //
+    // Now, try calling the pipeline actor that orchestrates everything
+    //
+
+    let month_of_july = rust_actix_labx::Interval::new(
+        PrimitiveDateTime::new(jul1, midnight),
+        PrimitiveDateTime::new(aug1, midnight),
+    );
+
+    let pipeline_addr =
+        ResponseTimeMonitoringPipeline::new(month_of_july, Duration::minutes(3)).start();
+
+    for i in 0..10 {
+        let req = ObserveResponseTime::new(rt_minutes_at(
+            Duration::seconds(180 + i),
+            1,
+            12,
+            (i % 60) as u8,
+        ));
+        let _ = pipeline_addr.send(req).await;
+    }
+
+    let resp = pipeline_addr
+        .send(CalculateResponseTimeStatistics::new())
+        .await;
+    let stats = resp.unwrap().value;
+
+    match stats.p95 {
+        Some(p95) => {
+            println!("RESULT: P95 = {}s  (n={})", p95.whole_seconds(), stats.n);
+        }
+        None => {
+            println!("RESULT: P95 not defined.");
+        }
+    }
 
     // stop system and exit
     System::current().stop();

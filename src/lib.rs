@@ -1,3 +1,5 @@
+extern crate core;
+
 use actix::prelude::*;
 use time::{Duration, PrimitiveDateTime};
 
@@ -7,6 +9,7 @@ pub struct Interval {
     from: PrimitiveDateTime,
     to: PrimitiveDateTime,
 }
+
 impl Interval {
     pub fn new(from: PrimitiveDateTime, to: PrimitiveDateTime) -> Self {
         Self { from, to }
@@ -96,6 +99,7 @@ impl ResponseTimeStatistics {
 #[derive(Message)]
 #[rtype(result = "ResponseTimeStatisticsCalculated")]
 pub struct CalculateResponseTimeStatistics {}
+
 impl CalculateResponseTimeStatistics {
     pub fn new() -> Self {
         CalculateResponseTimeStatistics {}
@@ -135,6 +139,7 @@ impl Handler<CalculateResponseTimeStatistics> for WindowedPercentileService {
 pub struct ObserveResponseTime {
     datum: ResponseTimeObservation,
 }
+
 impl ObserveResponseTime {
     pub fn new(rt: ResponseTimeObservation) -> ObserveResponseTime {
         ObserveResponseTime { datum: rt }
@@ -150,6 +155,10 @@ impl Message for ObserveResponseTime {
 impl Handler<ObserveResponseTime> for WindowedPercentileService {
     type Result = ();
     fn handle(&mut self, msg: ObserveResponseTime, _ctx: &mut Context<Self>) -> Self::Result {
+        println!(
+            "WindowedPercentileService ObserveResponseTime... {}",
+            &msg.datum.time
+        );
         self.add_observation(&msg.datum);
     }
 }
@@ -192,6 +201,111 @@ impl Handler<ResponseTimeStatisticsCalculated> for ResponseTimePerformanceMonito
                 None => {
                     // No observation, ignore
                 }
+            }
+        }
+    }
+}
+
+/// Response Time Monitoring pipeline.
+/// Actor responsible for collecting statistics, calculating percentiles and issuing notifications
+/// when performance levels are not met.
+pub struct ResponseTimeMonitoringPipeline {
+    state: ResponseTimeMonitoringPipelineState,
+}
+
+enum ResponseTimeMonitoringPipelineState {
+    New {
+        window: Interval,
+        maximum_duration: Duration,
+    },
+    Started {
+        wps_addr: Addr<WindowedPercentileService>,
+        rtpms_addr: Addr<ResponseTimePerformanceMonitorService>,
+    },
+    Stopped,
+}
+
+impl ResponseTimeMonitoringPipeline {
+    /// Create a new pipeline
+    pub fn new(window: Interval, maximum_duration: Duration) -> Self {
+        ResponseTimeMonitoringPipeline {
+            state: ResponseTimeMonitoringPipelineState::New {
+                window,
+                maximum_duration,
+            },
+        }
+    }
+}
+
+// Provide Actor implementation for our actor
+impl Actor for ResponseTimeMonitoringPipeline {
+    type Context = Context<Self>;
+
+    fn started(&mut self, _ctx: &mut Context<Self>) {
+        println!("ResponseTimeMonitoringPipeline: starting actors...");
+        if let ResponseTimeMonitoringPipelineState::New {
+            window,
+            maximum_duration,
+        } = &self.state
+        {
+            let wps = WindowedPercentileService::new(window.clone());
+            let rtpms = ResponseTimePerformanceMonitorService::new(maximum_duration.clone());
+            self.state = ResponseTimeMonitoringPipelineState::Started {
+                wps_addr: wps.start(),
+                rtpms_addr: rtpms.start(),
+            };
+        } else {
+            // ignore
+        }
+        println!("ResponseTimeMonitoringPipeline: started.");
+    }
+
+    fn stopped(&mut self, _ctx: &mut Context<Self>) {
+        self.state = ResponseTimeMonitoringPipelineState::Stopped;
+        println!("ResponseTimeMonitoringPipeline: stopped.");
+    }
+}
+
+// Implement message handlers on top-level pipeline
+// It delegates the work to its actors
+impl Handler<ObserveResponseTime> for ResponseTimeMonitoringPipeline {
+    type Result = ();
+    fn handle(&mut self, msg: ObserveResponseTime, _ctx: &mut Context<Self>) -> Self::Result {
+        match &self.state {
+            ResponseTimeMonitoringPipelineState::Started { wps_addr, .. } => {
+                println!("ResponseTimeMonitoringPipeline: Forwarding ObserveResponseTime...");
+                let _req = &wps_addr.do_send(msg); // force send this message (not async like .send())
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Handler<CalculateResponseTimeStatistics> for ResponseTimeMonitoringPipeline {
+    type Result = ResponseFuture<ResponseTimeStatisticsCalculated>;
+    fn handle(
+        &mut self,
+        msg: CalculateResponseTimeStatistics,
+        _ctx: &mut Context<Self>,
+    ) -> Self::Result {
+        match &self.state {
+            ResponseTimeMonitoringPipelineState::Started { wps_addr, .. } => {
+                println!("Started");
+                let r = wps_addr.send(msg);
+                Box::pin(async {
+                    let result = r.await;
+                    match result {
+                        Ok(res) => res,
+                        Err(_err) => {
+                            todo!("ResponseTimeMonitoringPipeline CalculateResponseTimeStatistics: received error result.")
+                        }
+                    }
+                })
+            }
+            _ => {
+                todo!(
+                    "ResponseTimeMonitoringPipeline CalculateResponseTimeStatistics: not started."
+                )
             }
         }
     }
