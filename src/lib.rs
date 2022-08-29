@@ -80,6 +80,7 @@ impl Actor for WindowedPercentileService {
 // Messages can be declared with macros or by implementing the right traits
 
 /// A message with response time statistics for an interval (e.g. the P95 level).
+#[derive(Clone)]
 pub struct ResponseTimeStatistics {
     //// The value of the 95th percentile
     pub p95: Option<Duration>,
@@ -195,7 +196,7 @@ impl Handler<ResponseTimeStatisticsCalculated> for ResponseTimePerformanceMonito
             match msg.value.p95 {
                 Some(p95) => {
                     if p95 >= self.maximum {
-                        println!("Breached");
+                        println!("😠 Response Time Maximum Duration Breached: actual={}s (maximum allowed: {} s)  (interval: {:?})", p95.whole_seconds(), self.maximum.whole_seconds(), msg.value.interval);
                     }
                 }
                 None => {
@@ -289,13 +290,28 @@ impl Handler<CalculateResponseTimeStatistics> for ResponseTimeMonitoringPipeline
         _ctx: &mut Context<Self>,
     ) -> Self::Result {
         match &self.state {
-            ResponseTimeMonitoringPipelineState::Started { wps_addr, .. } => {
+            ResponseTimeMonitoringPipelineState::Started {
+                wps_addr,
+                rtpms_addr,
+            } => {
                 println!("Started");
-                let r = wps_addr.send(msg);
-                Box::pin(async {
-                    let result = r.await;
+                let wps_req = wps_addr.send(msg);
+                let rtpms = rtpms_addr.clone();
+                Box::pin(async move {
+                    let result = wps_req.await;
                     match result {
-                        Ok(res) => res,
+                        Ok(res) => {
+                            // publish to monitoring agent
+                            println!("Sending response times to SLA monitoring...");
+                            let msg = ResponseTimeStatisticsCalculated {
+                                value: res.value.clone(),
+                            };
+                            let rtpms_req = rtpms.send(msg);
+                            let _rtpms_resp = rtpms_req.await.expect("Expected success");
+                            // return value
+                            res
+                        }
+
                         Err(_err) => {
                             todo!("ResponseTimeMonitoringPipeline CalculateResponseTimeStatistics: received error result.")
                         }
